@@ -1,0 +1,407 @@
+---
+title: "Diseño de experimentos del KOH con MB"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r, echo=FALSE, comment="", warning=FALSE}
+library(readxl)
+library(knitr)
+
+DOE_KOH_MB <- read_excel("DOE KOH 10%.xlsx", 
+     col_types = c("skip", "numeric", "numeric", 
+        "numeric", "numeric", "numeric"))
+
+kable(DOE_KOH_MB, format = "pipe", digits = 2, align = 'c')
+```
+
+# Los factores a optimizar
+
+-   x1 = Temperatura (ºC)
+-   x2 = Tiempo (h)
+-   x3 = Molaridad KOH (M)
+
+```{r, echo=FALSE, warning=FALSE}
+library(rsm)
+
+Rend = DOE_KOH_MB[!is.na(DOE_KOH_MB$`HA content (%)`),]
+
+Rend_data = coded.data(
+  Rend, 
+  formulas = list(
+    x1 ~ (Temperature - 45)/15,
+    x2 ~ (Time - 14)/10,
+    x3 ~ (KOH - 0.625)/0.375
+    ))
+
+Variables=c("Temperatura (ºC)", "Tiempo (h)", "KOH (M)")
+
+
+minx1 = min(Rend_data$x1)
+minx2 = min(Rend_data$x2)
+minx3 = min(Rend_data$x3)
+maxx1 = max(Rend_data$x1)
+maxx2 = max(Rend_data$x2)
+maxx3 = max(Rend_data$x3)
+```
+
+<div style="page-break-after: always; visibility: hidden"> 
+\pagebreak 
+</div>
+
+# Rendimiento (g COT AH/g COT total)
+
+```{r, echo=FALSE, comment="", warning=FALSE}
+
+Rend_model <- rsm((`HA content (%)`) ~ SO(x1, x2, x3), data = Rend_data)
+
+summary(Rend_model)
+#el p valor del analisis F si es mayor de 0.05 es que hay falta de ajuste en el modelo y no nos sirve el modelo propuesto. Esto se complementa con el R^2
+```
+
+```{r, echo=FALSE, comment= ""}
+
+#Como viene de un diseño exportado que no ha sido creado con el propio programa de R, es mejor ignorar este ajuste y hacer una optimización con la función optim
+
+opt_point_r <- summary(Rend_model)$canonical$xs
+
+op_point_rend <- code2val(
+  opt_point_r,                     
+  codings = codings(Rend_data)  
+)
+
+df11 = data.frame(round(op_point_rend,2))
+opt_point_r_df <- data.frame(  # predict() needs a data frame with the points 
+  x1 = opt_point_r[1],         # to be predicted 
+  x2 = opt_point_r[2],
+  x3 = opt_point_r[3]
+  )
+
+best_response_r <- predict(
+  Rend_model,             # Our model
+  opt_point_r_df             # Data frame with points to be predicted 
+)
+```
+
+<div style="page-break-after: always; visibility: hidden"> 
+\pagebreak 
+</div>
+
+```{r, echo=FALSE, comment="", warning=FALSE}
+formula_rend = function(x) -(Rend_model$coefficients[1] + 
+                               Rend_model$coefficients[2] * x[1] + 
+                               Rend_model$coefficients[3] * x[2] + 
+                               Rend_model$coefficients[4] * x[3] + 
+                               Rend_model$coefficients[5] * x[1] * x[2] + 
+                               Rend_model$coefficients[6] * x[1] * x[3] + 
+                               Rend_model$coefficients[7] * x[2] * x[3] + 
+                               Rend_model$coefficients[8] * x[1]^2 + 
+                               Rend_model$coefficients[9] * x[2]^2 + 
+                               Rend_model$coefficients[10] * x[3]^2)
+
+optim(c(0,0,0), formula_rend, method = "CG", lower = c(minx1,minx2, minx3), upper = c(maxx1,maxx2, maxx3)) -> Rend_model_optimo
+
+R1 = Rend_model_optimo$par[1]*15+45
+R2 = Rend_model_optimo$par[2]*10+14
+R3 = Rend_model_optimo$par[3]*0.375+0.675
+
+optimos_rendimiento = round(c(R1,R2,R3),2) 
+optimos_rendimiento_2 = Rend_model_optimo$par
+
+df12 = data.frame(Variables, optimos_rendimiento)
+
+df12
+
+opt_point_r_df_2 <- data.frame(  # predict() needs a data frame with the points 
+  x1 = Rend_model_optimo$par[1],         # to be predicted 
+  x2 = Rend_model_optimo$par[2],
+  x3 = Rend_model_optimo$par[3]
+  )
+
+best_response_r_2 <- predict(
+  Rend_model,             # Our model
+  opt_point_r_df_2             # Data frame with points to be predicted 
+  )
+```
+
+Rendimiento óptimo: `r round(best_response_r_2, 2)` g COT AH/100 g COT total
+
+```{r, warning=FALSE, echo=FALSE, comment=""}
+
+jpeg(filename = "graficos_Rend.jpg", width = 40, height = 30, units = "cm", res = 400, quality = 100)
+
+op <- par(mfrow = c(3, 3))   
+
+contour(Rend_model, ~ so(x1 + x2 + x3), at = data.frame(x1 = Rend_model_optimo$par[1], x2 = Rend_model_optimo$par[2], x3 = Rend_model_optimo$par[3]), image = TRUE, atpos = 0)
+
+persp(Rend_model, ~ x1 + x2 + x3, image = TRUE, at = data.frame(x1 = Rend_model_optimo$par[1], x2 = Rend_model_optimo$par[2], x3 = Rend_model_optimo$par[3]), col = "colors", contours = "colors", border = NA,  zlab = "Yield", atpos = 0)
+
+qqnorm(residuals(Rend_model), ylab = "Yield")
+qqline(residuals(Rend_model), col = 2) 
+
+par(op)
+
+```
+
+
+
+<div style="page-break-after: always; visibility: hidden"> 
+\pagebreak 
+</div>
+
+# Pureza (g COT AH/g sólido precipitado)
+
+```{r}
+Purity = DOE_KOH_MB[-3,]
+Purity = Purity[-8,]
+Purity = Purity[-9,]
+
+Pur_data = coded.data(
+  Purity, 
+  formulas = list(
+    x1 ~ (Temperature - 45)/15,
+    x2 ~ (Time - 14)/10,
+    x3 ~ (KOH - 0.625)/0.375
+    ))
+
+Variables=c("Temperatura (ºC)", "Tiempo (h)", "KOH (M)")
+
+
+minx1 = min(Pur_data$x1)
+minx2 = min(Pur_data$x2)
+minx3 = min(Pur_data$x3)
+maxx1 = max(Pur_data$x1)
+maxx2 = max(Pur_data$x2)
+maxx3 = max(Pur_data$x3)
+```
+
+
+```{r, echo=FALSE, comment=""}
+Pur_model <- rsm(`TOC content (%)` ~ SO(x1, x2, x3), data = Pur_data)
+
+summary(Pur_model)
+```
+
+<div style="page-break-after: always; visibility: hidden"> 
+\pagebreak 
+</div>
+```{r, echo=FALSE, comment= ""}
+
+#Como viene de un diseño exportado que no ha sido creado con el propio programa de R, es mejor ignorar este ajuste y hacer una optimización con la función optim
+
+opt_point_p <- summary(Pur_model)$canonical$xs
+
+op_point_pur <- code2val(
+  opt_point_p,                     
+  codings = codings(Pur_data)  
+)
+
+df12 = data.frame(round(op_point_pur,2))
+opt_point_p_df <- data.frame(  # predict() needs a data frame with the points 
+  x1 = opt_point_p[1],         # to be predicted 
+  x2 = opt_point_p[2],
+  x3 = opt_point_p[3]
+  )
+
+best_response_p <- predict(
+  Pur_model,             # Our model
+  opt_point_p_df             # Data frame with points to be predicted 
+)
+```
+
+```{r, echo=FALSE, comment="", warning=FALSE}
+formula_pur = function(x) -(Pur_model$coefficients[1] + 
+                              Pur_model$coefficients[2] * x[1] + 
+                              Pur_model$coefficients[3] * x[2] + 
+                              Pur_model$coefficients[4] * x[3] + 
+                              Pur_model$coefficients[5] * x[1] * x[2] + 
+                              Pur_model$coefficients[6] * x[1] * x[3] + 
+                              Pur_model$coefficients[7] * x[2] * x[3] + 
+                              Pur_model$coefficients[8] * x[1]^2 + 
+                              Pur_model$coefficients[9] * x[2]^2 + 
+                              Pur_model$coefficients[10] * x[3]^2)
+
+optim(c(0,0,0), formula_pur, method = "CG", lower = c(minx1,minx2, minx3), upper = c(maxx1,maxx2, maxx3), ) -> Pur_model_optimo
+
+R21 = Pur_model_optimo$par[1]*15+45
+R22 = Pur_model_optimo$par[2]*10+14
+R23 = Pur_model_optimo$par[3]*0.375+0.675
+
+optimos_pureza = round(c(R21,R22,R23),2) 
+optimos_pureza_2 = Pur_model_optimo$par
+
+df22 = data.frame(Variables, optimos_pureza)
+df22
+
+opt_point_p_df_2 <- data.frame(  # predict() needs a data frame with the points 
+  x1 = Pur_model_optimo$par[1],         # to be predicted 
+  x2 = Pur_model_optimo$par[2],
+  x3 = Pur_model_optimo$par[3]
+  )
+
+best_response_p_2 <- predict(
+  Pur_model,             # Our model
+  opt_point_p_df_2             # Data frame with points to be predicted 
+  )
+```
+
+Pureza óptima: `r round(best_response_p_2, 2)` g COT AH/100 g sólido precipitado
+
+```{r, warning=FALSE, echo=FALSE, comment=""}
+
+jpeg(filename = "graficos_Pur.jpg", width = 40, height = 30, units = "cm", res = 400, quality = 100)
+
+op <- par(mfrow = c(3, 3))   
+
+contour(Pur_model, ~ so(x1 + x2 + x3), at = data.frame(x1 = Pur_model_optimo$par[1], x2 = Pur_model_optimo$par[2], x3 = Pur_model_optimo$par[3]), image = TRUE, atpos = 0)
+
+persp(Pur_model, ~ x1 + x2 + x3, image = TRUE, at = data.frame(x1 = Pur_model_optimo$par[1], x2 = Pur_model_optimo$par[2], x3 = Pur_model_optimo$par[3]), col = "colors", contours = "colors", border = NA,  zlab = "Purity", atpos = 0)
+
+qqnorm(residuals(Pur_model), ylab = "Purity")
+qqline(residuals(Pur_model), col = 2) 
+
+par(op)
+
+```
+
+<div style="page-break-after: always; visibility: hidden"> 
+\pagebreak 
+</div>
+
+
+# Optimización global
+
+```{r, echo=FALSE, comment="", warning=FALSE}
+formula_total = function(x) -(Rend_model$coefficients[1] + Pur_model$coefficients[1] 
+                              + (Rend_model$coefficients[2] + Pur_model$coefficients[2]) * x[1] 
+                              + (Rend_model$coefficients[3] + Pur_model$coefficients[3]) * x[2] 
+                              + (Rend_model$coefficients[4] + Pur_model$coefficients[4]) * x[3] 
+                              + (Rend_model$coefficients[5] + Pur_model$coefficients[5]) * x[1] * x[2] 
+                              + (Rend_model$coefficients[6] + Pur_model$coefficients[6]) * x[1] * x[3] 
+                              + (Rend_model$coefficients[7] + Pur_model$coefficients[7]) * x[2] * x[3] 
+                              + (Rend_model$coefficients[8] + Pur_model$coefficients[8]) * x[1]^2 
+                              + (Rend_model$coefficients[9] + Pur_model$coefficients[9]) * x[2]^2 
+                              + (Rend_model$coefficients[10]+ Pur_model$coefficients[10])* x[3]^2)
+
+optim(c(0,0,0), formula_total, method = "CG", lower = c(minx1,minx2, minx3), upper = c(maxx1,maxx2, maxx3)) -> total_model_optimo
+
+R71 = total_model_optimo$par[1]*15+45
+R72 = total_model_optimo$par[2]*10+14
+R73 = total_model_optimo$par[3]*0.375+0.675
+
+optimos_total = round(c(R71,R72,R73),2) 
+optimos_total_2 = total_model_optimo$par
+
+df72 = data.frame(Variables, optimos_total)
+df72
+
+opt_point_total_df_2 <- data.frame(  # predict() needs a data frame with the points 
+  x1 = total_model_optimo$par[1],         # to be predicted 
+  x2 = total_model_optimo$par[2],
+  x3 = total_model_optimo$par[3]
+  )
+
+best_response_tr_2 <- predict(
+  Rend_model,             # Our model
+  opt_point_total_df_2             # Data frame with points to be predicted 
+  )
+
+
+best_response_tp_2 <- predict(
+  Pur_model,             # Our model
+  opt_point_total_df_2             # Data frame with points to be predicted 
+  )
+```
+
+Rendimiento óptimo: `r round(best_response_tr_2, 2)` g COT AH/100 g COT total
+Pureza óptima: `r round(best_response_tp_2, 2)` g COT AH/100 g sólido precipitado
+
+```{r, echo=FALSE, comment="", warning=FALSE}
+Total_model <- rsm((`HA content (%)`+`TOC content (%)`) ~ SO(Temperature, Time, KOH), data = DOE_KOH_MB)
+
+summary(Total_model)
+#el p valor del analisis F si es mayor de 0.05 es que hay falta de ajuste en el modelo y no nos sirve el modelo propuesto. Esto se complementa con el R^2
+```
+
+
+Figuras globales
+```{r, warning=FALSE, echo=FALSE, comment=""}
+library(RColorBrewer)
+
+palette <- colorRampPalette(brewer.pal(7, "YlGnBu"))
+```
+
+
+#```{r, warning=FALSE, echo=FALSE, comment=""}
+
+```{r}
+png(filename = "A.png", width = 50, height = 50, units = "cm", res = 400)
+
+op <- par(mfcol = c(1, 1), cex.lab=3, cex.axis=3)   
+
+persp(Rend_model, ~ x1 + x2, image = TRUE, at = data.frame(x1 = Rend_model_optimo$par[1], x2 = Rend_model_optimo$par[2], x3 = Rend_model_optimo$par[3]), col = palette(100), contours = "colors",  border = NA, zlab = "HA ratio (%)", atpos = 0)
+title(main="(A)", cex.main = 7, adj = 0.1)
+
+
+par(op)
+```
+
+```{r}
+png(filename = "C.png", width = 50, height = 50, units = "cm", res = 400)
+
+op <- par(mfcol = c(1, 1), cex.lab=3, cex.axis=3)   
+
+persp(Rend_model, ~ x1 + x3, image = TRUE, at = data.frame(x1 = Rend_model_optimo$par[1], x2 = Rend_model_optimo$par[2], x3 = Rend_model_optimo$par[3]), col = palette(100), contours = "colors", border = NA,  zlab = "HA ratio (%)", atpos = 0)
+title(main="(C)", cex.main = 7, adj = 0.1)
+
+par(op)
+```
+
+```{r}
+png(filename = "E.png", width = 50, height = 50, units = "cm", res = 400)
+
+op <- par(mfcol = c(1, 1), cex.lab=3, cex.axis=3)   
+
+persp(Rend_model, ~ x2 + x3, image = TRUE, at = data.frame(x1 = Rend_model_optimo$par[1], x2 = Rend_model_optimo$par[2], x3 = Rend_model_optimo$par[3]), col = palette(100), contours = "colors", border = NA,  zlab = "HA ratio (%)", atpos = 0)
+title(main="(E)", cex.main = 7, adj = 0.1)
+
+par(op)
+```
+
+```{r}
+png(filename = "B.png", width = 50, height = 50, units = "cm", res = 400)
+
+op <- par(mfcol = c(1, 1), cex.lab=3, cex.axis=3)   
+
+persp(Pur_model, ~ x1 + x2 , image = TRUE, at = data.frame(x1 = Pur_model_optimo$par[1], x2 = Pur_model_optimo$par[2], x3 = Pur_model_optimo$par[3]), col = palette(100), contours = "colors", border = NA,  zlab = "TOC content (%)", atpos = 0)
+title(main="(B)", cex.main = 7, adj = 0.1)
+
+par(op)
+
+```
+
+```{r}
+png(filename = "D.png", width = 50, height = 50, units = "cm", res = 400)
+
+op <- par(mfcol = c(1, 1), cex.lab=3, cex.axis=3)   
+
+persp(Pur_model, ~ x1 + x3, image = TRUE, at = data.frame(x1 = Pur_model_optimo$par[1], x2 = Pur_model_optimo$par[2], x3 = Pur_model_optimo$par[3]), col = palette(100), contours = "colors", border = NA,  zlab = "TOC content (%)", atpos = 0)
+title(main="(D)", cex.main = 7, adj = 0.1)
+
+par(op)
+
+```
+
+```{r}
+png(filename = "F.png", width = 50, height = 50, units = "cm", res = 400)
+
+op <- par(mfcol = c(1, 1), cex.lab=3, cex.axis=3)   
+
+persp(Pur_model, ~ x2 + x3, image = TRUE, at = data.frame(x1 = Pur_model_optimo$par[1], x2 = Pur_model_optimo$par[2], x3 = Pur_model_optimo$par[3]), col = palette(100), contours = "colors", border = NA, zlab = "TOC content (%)", atpos = 0)
+title(main="(F)", cex.main = 7, adj = 0.1)
+
+par(op)
+
+```
