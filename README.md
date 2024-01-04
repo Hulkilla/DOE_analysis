@@ -1,0 +1,1 @@
+In this repository you will find different scripts to analyze data that you have obtained through experimental design to obtain an optimal working point. It can be used, for example, to analyze the behavior of a piece of equipment and how different operating conditions influence it.
